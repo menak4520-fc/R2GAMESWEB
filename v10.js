@@ -1,0 +1,16 @@
+/* R2 GAMES V10: server profile + real rooms + rewards */
+(function(){
+ const KEY='r2_v10_player'; let me=JSON.parse(localStorage.getItem(KEY)||'null');
+ const makeId=()=>Array.from({length:16},()=>Math.floor(Math.random()*10)).join('');
+ if(!me) me={id:makeId(),name:localStorage.getItem('r2_player_name')||'لاعب R2'};
+ const persist=()=>localStorage.setItem(KEY,JSON.stringify(me)); persist();
+ let socket=null;
+ function boot(){if(!window.io)return setTimeout(boot,300);socket=io();socket.on('connect',()=>socket.emit('identify',{playerId:me.id,name:me.name}));socket.on('player:data',sync);socket.on('game:reward',x=>{if(x.playerId===me.id)sync(x.reward.total);});socket.on('game:start',x=>{window.r2Room={...x.room,code:x.room.code,game:x.game};alert('🎮 بدأت المباراة ضد '+x.room.players.find(p=>p.id!==me.id)?.name);if(typeof window.showSection==='function'){const map={auction:'auction-game',five:'five-game',deal:'deal-game',blind:'blind-game',guess:'guess-game',hidden:'hidden-game'};if(map[x.game])window.showSection(map[x.game]);}});socket.on('room:waiting-settings',x=>{const e=document.getElementById('room-status');if(e)e.innerText='⏳ '+x.message});}
+ function sync(p){if(!p)return;me={...me,...p};persist(); if(window.R2&&window.R2.state){window.R2.state.xb=p.xb;window.R2.state.points=p.points;window.R2.state.coins=p.coins;try{window.R2.render()}catch(e){}}}
+ window.R2V10={me,boot,complete:function(){if(socket&&window.r2Room?.code)socket.emit('game:complete',{code:window.r2Room.code,playerId:me.id,name:me.name},()=>{});else{fetch('/api/player/init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerId:me.id,name:me.name})}).then(()=>fetch('/api/player/'+me.id)).then(r=>r.json()).then(x=>{if(x.player)sync(x.player)});alert('🎁 مكافأة إنهاء اللعبة: +15 XB +600 POINTS +1000 MARKET COINS');}}};
+ const oldCreate=window.createRoom; window.createRoom=async function(){if(!socket||!socket.connected)return oldCreate&&oldCreate();const game=document.getElementById('room-game-select')?.value||'auction',password=document.getElementById('room-password')?.value||'';socket.emit('room:create',{game,password,playerId:me.id,name:me.name},d=>{if(!d.ok)return alert(d.error);window.r2Room=d;const c=document.getElementById('generated-code');if(c)c.innerText=d.code;const st=document.getElementById('room-status');if(st)st.innerText='🟢 الغرفة جاهزة. الكود 6 أحرف/أرقام.'});};
+ window.connectRoom=function(){const code=document.getElementById('join-code-input')?.value.trim(),password=document.getElementById('join-password-input')?.value||'';if(!code)return alert('اكتب كود الغرفة');socket.emit('room:join',{code,password,playerId:me.id,name:me.name},d=>{if(!d.ok)return alert(d.error);window.r2Room=d;const st=document.getElementById('room-status');if(st)st.innerText='🟢 دخلت مع '+d.players.find(p=>p.id!==me.id)?.name+' — انتظار إعدادات صاحب الغرفة.'});};
+ // Correct final game reward everywhere without changing the five game rules.
+ const wait=setInterval(()=>{if(window.R2&&window.R2.state){clearInterval(wait);const old=window.R2.completeGame;window.R2.completeGame=function(){window.R2V10.complete();return old&&old.apply(this,arguments)}}},300);
+ boot();
+})();
