@@ -34,7 +34,10 @@ function saveDb() {
 
 const rooms = new Map();
 app.use(express.json({ limit: '128kb' }));
-app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+
+// 1. تقديم الملفات الثابتة من مجلد public والمجلد الرئيسي كاحتياطي
+const PUBLIC_DIR = fs.existsSync(path.join(__dirname, 'public')) ? path.join(__dirname, 'public') : __dirname;
+app.use(express.static(PUBLIC_DIR));
 
 const roomCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const tournamentCode = () => crypto.randomBytes(5).toString('hex').toUpperCase();
@@ -75,9 +78,23 @@ function publicTournament(t) {
   };
 }
 
+// 2. مسار الصفحة الرئيسية الصريح لمنع خطأ NOT FOUND
+app.get('/', (req, res) => {
+  const publicIndex = path.join(__dirname, 'public', 'index.html');
+  const rootIndex = path.join(__dirname, 'index.html');
+  
+  if (fs.existsSync(publicIndex)) {
+    return res.sendFile(publicIndex);
+  } else if (fs.existsSync(rootIndex)) {
+    return res.sendFile(rootIndex);
+  } else {
+    return res.status(404).send('<h2 style="text-align:center;margin-top:50px;font-family:sans-serif;">خطأ: لم يتم العثور على ملف index.html داخل المشروع.</h2>');
+  }
+});
+
 // Health Check API
 app.get('/api/health', (req, res) => res.set('Cache-Control', 'no-store').json({
-  ok: true, version: '9.1.0', rooms: rooms.size, tournaments: Object.keys(db.tournaments).length, uptime: Math.round(process.uptime()), time: Date.now()
+  ok: true, version: '9.2.0', rooms: rooms.size, tournaments: Object.keys(db.tournaments).length, uptime: Math.round(process.uptime()), time: Date.now()
 }));
 
 // HTTP API Rooms
@@ -206,7 +223,6 @@ io.on('connection', socket => {
     for (const [c, r] of rooms) {
       if (r.players.delete(socket.id)) {
         io.to(c).emit('room:player-left', { players: r.players.size });
-        // إعطاء مهلة 5 دقائق للغرفة إذا أصبحت فارغة حتى لا تُحذف فوراً عند انقضاء اتصال المنشئ
         if (!r.players.size) {
           setTimeout(() => {
             const currentRoom = rooms.get(c);
@@ -229,4 +245,4 @@ setInterval(() => {
 app.use((req, res) => res.status(404).json({ error: 'NOT FOUND', path: req.path }));
 
 const PORT = Number(process.env.PORT) || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log('R2 GAMES V9.1 online on ' + PORT));
+server.listen(PORT, '0.0.0.0', () => console.log('R2 GAMES V9.2 online on ' + PORT));
