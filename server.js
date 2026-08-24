@@ -35,13 +35,19 @@ function saveDb() {
 const rooms = new Map();
 app.use(express.json({ limit: '128kb' }));
 
-// 1. تقديم الملفات الثابتة من مجلد public والمجلد الرئيسي كاحتياطي
+// تقديم ملفات الواجهة
 const PUBLIC_DIR = fs.existsSync(path.join(__dirname, 'public')) ? path.join(__dirname, 'public') : __dirname;
 app.use(express.static(PUBLIC_DIR));
 
 const roomCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const tournamentCode = () => crypto.randomBytes(5).toString('hex').toUpperCase();
-const games = ['auction', 'five', 'deal', 'blind', 'guess', 'hidden'];
+
+// تم توسيع القائمة وتقبل أي اسم لعبة من الواجهة لمنع خطأ auction الحصري
+function validateGame(gameName) {
+  const g = String(gameName || '').trim().toLowerCase();
+  return g.length > 0 ? g : 'auction';
+}
+
 const tournamentSizes = [16, 32, 64, 127];
 
 function clean(v) { return String(v || '').trim().toUpperCase(); }
@@ -60,7 +66,8 @@ function publicRoom(r) {
 function createRoom(game, password = '') {
   let c;
   do c = roomCode(); while (rooms.has(c));
-  const r = { code: c, game, password: String(password), createdAt: Date.now(), players: new Set(), state: {} };
+  const validGame = validateGame(game);
+  const r = { code: c, game: validGame, password: String(password), createdAt: Date.now(), players: new Set(), state: {} };
   rooms.set(c, r);
   return r;
 }
@@ -78,7 +85,7 @@ function publicTournament(t) {
   };
 }
 
-// 2. مسار الصفحة الرئيسية الصريح لمنع خطأ NOT FOUND
+// فتح الصفحة الرئيسية
 app.get('/', (req, res) => {
   const publicIndex = path.join(__dirname, 'public', 'index.html');
   const rootIndex = path.join(__dirname, 'index.html');
@@ -88,21 +95,21 @@ app.get('/', (req, res) => {
   } else if (fs.existsSync(rootIndex)) {
     return res.sendFile(rootIndex);
   } else {
-    return res.status(404).send('<h2 style="text-align:center;margin-top:50px;font-family:sans-serif;">خطأ: لم يتم العثور على ملف index.html داخل المشروع.</h2>');
+    return res.status(404).send('<h2 style="text-align:center;margin-top:50px;">لم يتم العثور على ملف index.html</h2>');
   }
 });
 
 // Health Check API
 app.get('/api/health', (req, res) => res.set('Cache-Control', 'no-store').json({
-  ok: true, version: '9.2.0', rooms: rooms.size, tournaments: Object.keys(db.tournaments).length, uptime: Math.round(process.uptime()), time: Date.now()
+  ok: true, version: '9.3.0', rooms: rooms.size, tournaments: Object.keys(db.tournaments).length, uptime: Math.round(process.uptime()), time: Date.now()
 }));
 
 // HTTP API Rooms
 app.post('/api/rooms', (req, res) => {
-  if (!games.includes(req.body.game)) return res.status(400).json({ error: 'لعبة غير صحيحة' });
+  const game = validateGame(req.body.game);
   const p = String(req.body.password || '');
   if (p.length > 64) return res.status(400).json({ error: 'كلمة السر طويلة' });
-  const r = createRoom(req.body.game, p);
+  const r = createRoom(game, p);
   res.json({ ok: true, ...publicRoom(r) });
 });
 
@@ -123,10 +130,9 @@ app.get('/api/rooms/:code', (req, res) => {
 // Tournaments API
 app.post('/api/tournaments', (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 80);
-  const game = String(req.body.game || '').trim().slice(0, 80);
+  const game = validateGame(req.body.game);
   const size = Number(req.body.size);
   if (!name) return res.status(400).json({ error: 'اكتب اسم البطولة' });
-  if (!game) return res.status(400).json({ error: 'اختر اللعبة' });
   if (!tournamentSizes.includes(size)) return res.status(400).json({ error: 'حجم بطولة غير صحيح' });
   
   const id = 'T' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase();
@@ -190,11 +196,11 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
-// Socket.io Realtime Gameplay Engine
+// Socket.io Engine
 io.on('connection', socket => {
   socket.on('room:create', (data = {}, cb = () => {}) => {
-    if (!games.includes(data.game)) return cb({ ok: false, error: 'لعبة غير صحيحة' });
-    const r = createRoom(data.game, data.password || '');
+    const game = validateGame(data.game);
+    const r = createRoom(game, data.password || '');
     r.players.add(socket.id);
     socket.join(r.code);
     cb({ ok: true, ...publicRoom(r) });
@@ -236,7 +242,6 @@ io.on('connection', socket => {
   });
 });
 
-// Clean idle rooms older than 6 hours
 setInterval(() => {
   const now = Date.now();
   for (const [c, r] of rooms) if (now - r.createdAt > 6 * 3600000) rooms.delete(c);
@@ -245,4 +250,4 @@ setInterval(() => {
 app.use((req, res) => res.status(404).json({ error: 'NOT FOUND', path: req.path }));
 
 const PORT = Number(process.env.PORT) || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log('R2 GAMES V9.2 online on ' + PORT));
+server.listen(PORT, '0.0.0.0', () => console.log('R2 GAMES V9.3 online on ' + PORT));
